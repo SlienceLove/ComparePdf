@@ -9,6 +9,7 @@
           图片对比 获取俩个pdf文件 将各自的图片全部输出到输出目录下，生成一个图片对比页面 将这些相同的图片对比展示
 
 ![image](https://github.com/user-attachments/assets/ae88cc66-c95c-4a3f-9e5c-3895e458fd66)
-![Uploading image.png…]()
+![image](https://github.com/user-attachments/assets/cf1fab40-1e03-478b-b1b0-03532f39e337)
 
+![Uploading image.png…]()
 
