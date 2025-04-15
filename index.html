@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF对比工具</title>
+</head>
+<body>
+<h1>Extract Images from PDF</h1>
+<form action="/extractImage" method="post">
+    <button type="submit">图片对比</button>
+</form>
+
+<h1>Extract Text from PDF</h1>
+<form action="/extractText" method="post">
+    <button type="submit">文字对比</button>
+</form>
+
+
+
+<button type="button" onclick="openShowPDF()">打开显示页面</button>
+
+
+<form id="open-pdf-form" enctype="multipart/form-data">
+    <input type="file" id="pdf-file-input1" name="pdf-file1" accept="application/pdf" style="display: none;">
+    <input type="file" id="pdf-file-input2" name="pdf-file2" accept="application/pdf" style="display: none;">
+</form>
+
+<script>
+    function openPDF1(callback) {
+        document.getElementById('pdf-file-input1').click();
+        document.getElementById('pdf-file-input1').addEventListener('change', function(event) {
+            handleFileChange(event, 'pdf-iframe1', 'pdf1');
+            if (callback) {
+                callback();
+            }
+        });
+    }
+
+    function openPDF2(callback) {
+        document.getElementById('pdf-file-input2').click();
+        document.getElementById('pdf-file-input2').addEventListener('change', function(event) {
+            handleFileChange(event, 'pdf-iframe2', 'pdf2');
+            if (callback) {
+                callback();
+            }
+        });
+    }
+
+    document.getElementById('pdf-file-input1').addEventListener('change', function(event) {
+        handleFileChange(event, 'pdf-iframe1', 'pdf1');
+    });
+
+    document.getElementById('pdf-file-input2').addEventListener('change', function(event) {
+        handleFileChange(event, 'pdf-iframe2', 'pdf2');
+    });
+    
+    function handleFileChange(event, iframeId, pdfKey) {
+        const file = event.target.files[0];
+        if (file) {
+            const url = URL.createObjectURL(file);
+            const pdfIframe = document.getElementById(iframeId);
+            if (pdfIframe) {
+                pdfIframe.src = url;
+                document.getElementById('pdf-container').style.display = 'flex';
+                // 记录文件的 URL
+                localStorage.setItem(pdfKey, url);
+            }
+        }
+    }
+    
+    function openShowPDF() {
+        openPDF1(() => {
+            openPDF2(() => {
+                const file1Url = localStorage.getItem('pdf1');
+                const file2Url = localStorage.getItem('pdf2');
+
+                if (file1Url && file2Url) {
+                    window.location.href = `/static/showpdf.html`;
+                } else {
+                    alert('请先选择两个PDF文件。');
+                }
+            });
+        });
+    }
+
+
+
+
+
+
+</script>
+
+</body>
+
+
+</html>

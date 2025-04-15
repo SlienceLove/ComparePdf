@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Compare PDFs</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+        .pdf-container {
+            width: 35%;
+            height: 100%;
+            border: 1px solid #ccc;
+            overflow: auto;
+            position: relative;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .pdf-container h2 {
+            margin-top: 0;
+        }
+        .pdf-container pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+            height: calc(50% - 40px); /* 50% of the container minus padding */
+            overflow: auto;
+        }
+        .comparison-list {
+            width: 30%;
+            height: 100%;
+            background: #f0f0f0;
+            overflow: auto;
+            padding: 10px;
+            box-sizing: border-box;
+            position: relative;
+        }
+        .comparison-item {
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .comparison-item:hover {
+            background-color: #e0e0e0;
+        }
+        .highlight-common {
+            background-color: yellow;
+            padding: 2px;
+        }
+        .highlight-identical {
+            background-color: lightgreen;
+            padding: 2px;
+        }
+        .highlight-entire {
+            background-color: red;
+            padding: 2px;
+        }
+        .highlight-no-common {
+            background-color: lightyellow;
+            padding: 2px;
+        }
+        .pdf-snapshot {
+            width: 100%;
+            height: 50%;
+            border: 1px solid #ccc;
+            margin-top: 10px;
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .pdf-snapshot iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+<div class="pdf-container" id="new-pdf-container">
+    <h2>New PDF Content</h2>
+    <pre id="new-pdf-content"></pre>
+    <div class="pdf-snapshot" id="new-pdf-snapshot"></div>
+</div>
+<div class="comparison-list" id="comparison-list"></div>
+<div class="pdf-container" id="old-pdf-container">
+    <h2>Old PDF Content</h2>
+    <pre id="old-pdf-content"></pre>
+    <div class="pdf-snapshot" id="old-pdf-snapshot"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js"></script>
+<script>
+    let newPdfViewer, oldPdfViewer;
+    // 全局变量
+    let pdf_1;
+    let pdf_2;
+
+    async function fetchCommonParagraphs() {
+        const response = await fetch('http://localhost:8080/static/output/JsonFromPdf/CommonParagraphs.json');
+        const data = await response.json();
+        return data;
+    }
+
+    function highlightText(containerId, text, commonSubstrings, identical, hasCommon) {
+        const container = document.getElementById(containerId);
+        const content = container.querySelector('pre').innerHTML; // 获取当前内容
+        let highlightedText = content;
+
+        // 找到对应的段落
+        const regex = new RegExp(`(第 ${text.page} 页, 第 ${text.line} 行: ${text.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
+        const match = content.match(regex);
+
+        if (match) {
+            let highlightedSegment = match[0];
+
+            if (identical) {
+                // 完全一致的段落用红色高亮
+                highlightedSegment = highlightedSegment.replace(new RegExp(`(${text.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g'), `<span class="highlight-entire">$1</span>`);
+            } else if (hasCommon) {
+                let hasHighlight = false;
+                // 共同子字符串用绿色高亮
+                commonSubstrings.forEach(substring => {
+                    const regex = new RegExp(`(${substring.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'g');
+                    highlightedSegment = highlightedSegment.replace(regex, match => {
+                        hasHighlight = true;
+                        return `<span class="highlight-identical">${match}</span>`;
+                    });
+                });
+
+                // 如果没有高亮标签，则将整行文字设置为淡黄色
+                if (!hasHighlight) {
+                    highlightedSegment = `<span class="highlight-no-common">${highlightedSegment}</span>`;
+                }
+            } else {
+                // 没有共同子字符串用淡黄色高亮
+                highlightedSegment = `<span class="highlight-no-common">${highlightedSegment}</span>`;
+            }
+
+            // 替换原内容中的段落
+            highlightedText = highlightedText.replace(match[0], highlightedSegment);
+        }
+
+        container.querySelector('pre').innerHTML = highlightedText;
+    }
+
+    function clearHighlights(containerId) {
+        const container = document.getElementById(containerId);
+        const content = container.querySelector('pre');
+        content.innerHTML = content.innerHTML.replace(/<span class="highlight-common">(.*?)<\/span>/g, '$1')
+            .replace(/<span class="highlight-identical">(.*?)<\/span>/g, '$1')
+            .replace(/<span class="highlight-entire">(.*?)<\/span>/g, '$1')
+            .replace(/<span class="highlight-no-common">(.*?)<\/span>/g, '$1');
+    }
+
+
+    let newPdfLoaded = false;
+    let oldPdfLoaded = false;
+
+    function createPdfViewer(url, containerId) {
+        const container = document.getElementById(containerId);
+        const iframe = document.createElement('iframe');
+        iframe.src = `pdfjs/web/viewer.html?file=${encodeURIComponent(url)}`;
+        iframe.className = 'pdf-viewer';
+        container.appendChild(iframe);
+
+        iframe.onload = () => {
+            if (containerId === 'new-pdf-snapshot') {
+                newPdfLoaded = true;
+            } else if (containerId === 'old-pdf-snapshot') {
+                oldPdfLoaded = true;
+            }
+            console.log(`${containerId} iframe loaded`);
+
+            // 监听消息以确保搜索框被更新
+            const viewerWindow = iframe.contentWindow;
+            viewerWindow.addEventListener('message', (e) => {
+                if (e.data.action === 'find') {
+                    const findBar = viewerWindow.PDFViewerApplication.findBar;
+                    findBar.findField.value = e.data.query;
+                    findBar.highlightAll.checked = true;
+                    findBar.dispatchEvent(new Event('highlightallchange'));
+                }
+            }, false);
+        };
+
+        return { container, iframe };
+    }
+
+    function fetchPaths() {
+        return fetch('paths.txt')
+            .then(response => response.text())
+            .then(data => {
+                const lines = data.trim().split('\n');
+                return lines;
+            })
+            .catch(error => {
+                console.error('Error fetching paths.txt:', error);
+                return []; // 返回空数组表示失败
+            });
+    }
+
+    function searchTextInPdf(pdfViewer, text, callback) {
+        const iframe = pdfViewer.iframe;
+        const viewerWindow = iframe.contentWindow;
+
+        if (viewerWindow && viewerWindow.PDFViewerApplication) {
+            // 发送搜索请求
+            viewerWindow.postMessage({ action: 'find', query: text, caseSensitive: false, highlightAll: true, findPrevious: false }, '*');
+            console.log(`Sent search request for "${text}"`);
+
+            // 等待搜索完成
+            setTimeout(() => {
+                if (callback) {
+                    //console.log(123)
+                    callback();
+                }
+            }, 500); // 假设搜索需要500毫秒完成
+        } else {
+            console.error(`Viewer window or PDFViewerApplication not available for iframe:`, iframe);
+        }
+    }
+
+
+
+    function goToPageInPdf(pdfViewer, pageNumber) {
+        const iframe = pdfViewer.iframe;
+        const viewerWindow = iframe.contentWindow;
+
+        if (viewerWindow && viewerWindow.PDFViewerApplication) {
+            // 强制跳转到指定页码
+            viewerWindow.postMessage({ action: 'goToPage', pageNumber: pageNumber }, '*');
+            //console.log(`Sent goToPage request for page ${pageNumber}`);
+        } else {
+            console.error(`Viewer window or PDFViewerApplication not available for iframe:`, iframe);
+        }
+    }
+
+    async function initializePdfViewers() {
+        try {
+            const lines = await fetchPaths();
+            if (lines.length === 2) {
+                pdf1 = lines[0];
+                pdf2 = lines[1];
+
+                console.log(pdf1, pdf2);
+               
+                const path01="../../"+pdf1;
+                const path02="../../"+pdf2;
+                
+                // 初始化 PDF 查看器
+                newPdfViewer = await createPdfViewer(path01, 'new-pdf-snapshot');
+                oldPdfViewer = await createPdfViewer(path02, 'old-pdf-snapshot');
+
+                // 在这里可以添加其他需要在初始化后执行的代码
+                console.log('PDF viewers initialized successfully.');
+
+                const data = await fetchCommonParagraphs();
+                const newPdfContent = document.getElementById('new-pdf-content');
+                const oldPdfContent = document.getElementById('old-pdf-content');
+                const comparisonList = document.getElementById('comparison-list');
+
+                const path1=pdf1;
+                const path2=pdf2;
+                console.log(path1)
+                const newPdfLoadingTask = pdfjsLib.getDocument(path1);
+                const oldPdfLoadingTask = pdfjsLib.getDocument(path2);
+                const [newPdf, oldPdf] = await Promise.all([newPdfLoadingTask.promise, oldPdfLoadingTask.promise]);
+                const newPdfNumPages = newPdf.numPages;
+                const oldPdfNumPages = oldPdf.numPages;
+
+                // 过滤无效的段落
+                const validParagraphs = data.common_paragraphs.filter(paragraph =>
+                    paragraph.page1 >= 1 && paragraph.page1 <= newPdfNumPages &&
+                    paragraph.page2 >= 1 && paragraph.page2 <= oldPdfNumPages
+                );
+
+                // 生成对比列表
+                validParagraphs.forEach(paragraph => {
+                    const listItem = document.createElement('div');
+                    listItem.className = 'comparison-item';
+                    listItem.textContent = `第 ${paragraph.page1} 页, 第 ${paragraph.line1} 行 - 第 ${paragraph.page2} 页, 第 ${paragraph.line2} 行`;
+
+                    // 绑定点击事件
+                    listItem.onclick = async () => {
+                        clearHighlights('new-pdf-container');
+                        clearHighlights('old-pdf-container');
+
+                        const identical = paragraph.text1 === paragraph.text2;
+                        const hasCommon = paragraph.common_substrings.length > 0;
+
+                        // 只高亮选中的这一行
+                        highlightText('new-pdf-container', { page: paragraph.page1, line: paragraph.line1, text: paragraph.text1 }, paragraph.common_substrings, identical, hasCommon);
+                        highlightText('old-pdf-container', { page: paragraph.page2, line: paragraph.line2, text: paragraph.text2 }, paragraph.common_substrings, identical, hasCommon);
+
+                        // 滚动到高亮部分
+                        const newPre = document.getElementById('new-pdf-container').querySelector('pre');
+                        const oldPre = document.getElementById('old-pdf-container').querySelector('pre');
+
+                        const newHighlighted = newPre.querySelector('.highlight-entire, .highlight-identical, .highlight-no-common');
+                        const oldHighlighted = oldPre.querySelector('.highlight-entire, .highlight-identical, .highlight-no-common');
+
+                        if (newHighlighted) {
+                            newHighlighted.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                        if (oldHighlighted) {
+                            oldHighlighted.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+
+                        // 等待 iframe 完全加载后再进行高亮
+                        await new Promise((resolve) => {
+                            const checkLoadStatus = setInterval(() => {
+                                if (newPdfLoaded && oldPdfLoaded) {
+                                    clearInterval(checkLoadStatus);
+                                    resolve();
+                                }
+                            }, 100);
+                        });
+
+                        // 在两个 PDF 查看器中搜索并高亮
+                        const searchTextNew = paragraph.text1; // 使用完整的段落内容作为搜索内容
+                        const searchTextOld = paragraph.text2; // 使用完整的段落内容作为搜索内容
+
+
+
+
+                        searchTextInPdf(newPdfViewer, searchTextNew, () => {
+                            const newPageNumber = paragraph.page1;
+                            goToPageInPdf(newPdfViewer, newPageNumber);
+                        });
+
+                        searchTextInPdf(oldPdfViewer, searchTextOld, () => {
+                            const oldPageNumber = paragraph.page2;
+                            goToPageInPdf(oldPdfViewer, oldPageNumber);
+                        });
+
+
+                        const newPageNumber = paragraph.page1;
+                        const oldPageNumber = paragraph.page2;
+
+                        // 跳转到指定页码
+                        const newPdfFrame = newPdfViewer.iframe.contentWindow;
+                        const oldPdfFrame = oldPdfViewer.iframe.contentWindow;
+
+                        if (newPdfFrame && newPdfFrame.PDFViewerApplication) {
+                            newPdfFrame.PDFViewerApplication.page = newPageNumber;
+                        }
+
+                        if (oldPdfFrame && oldPdfFrame.PDFViewerApplication) {
+                            oldPdfFrame.PDFViewerApplication.page = oldPageNumber;
+                        }
+
+                    };
+
+                    comparisonList.appendChild(listItem);
+
+                    // 只展示共同部分所在段落
+                    newPdfContent.innerHTML += `第 ${paragraph.page1} 页, 第 ${paragraph.line1} 行: ${paragraph.text1}\n`;
+                    oldPdfContent.innerHTML += `第 ${paragraph.page2} 页, 第 ${paragraph.line2} 行: ${paragraph.text2}\n`;
+                });
+
+                // 确保列表项的点击事件能正确触发
+                comparisonList.addEventListener('click', (event) => {
+                    if (event.target.classList.contains('comparison-item')) {
+                        event.target.click();
+                    }
+                });
+
+
+            } else {
+                alert('paths.txt 文件格式不正确。');
+            }
+        } catch (error) {
+            console.error('Error initializing PDF viewers:', error);
+        }
+    }
+    
+    
+    window.onload = async () => {
+
+
+      await  initializePdfViewers();
+
+        
+        
+     
+    };
+
+
+</script>
+</body>
+</html>
