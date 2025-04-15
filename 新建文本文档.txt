@@ -1,1 +1,0 @@
-../static/diff_match_patch.js
